@@ -107,7 +107,7 @@ int main(int argc, char* argv[]) {
     }
     int n = argc;
     printf("argc : %d\n", argc);
-    for (int i = 2; i < n; i += 2) {
+    for (int i = 1; i < n; i += 2) {
         EthArpPacket packet;
         const char* sender_ip = argv[i];
         const char* target_ip = argv[i + 1];
@@ -115,7 +115,7 @@ int main(int argc, char* argv[]) {
 	printf("sip : %s\n", sender_ip);
 	printf("tip : %s\n", target_ip);
 
-        string sender_mac = get_sender_mac(handle, my_mac, argv[1], sender_ip);
+        string sender_mac = get_sender_mac(handle, my_mac, argv[2], sender_ip);
 
         if (sender_mac.empty()) {
             cerr << "Failed to get sender MAC address" << endl;
