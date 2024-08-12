@@ -9,6 +9,7 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <arpa/inet.h>
+#include <chrono>
 
 #include "ethhdr.h"
 #include "arphdr.h"
@@ -16,6 +17,7 @@
 using namespace std;
 
 #define MAC_ADDR_LEN 6  // MAC 주소의 길이 정의
+#define ARP_REPLY_TIMEOUT 5  // ARP 응답 타임아웃 (초 단위)
 
 #pragma pack(push, 1)
 struct EthArpPacket final {
@@ -70,6 +72,8 @@ string get_sender_mac(pcap_t* handle, const uint8_t* my_mac, const char* my_ip, 
         return "";
     }
 
+    auto start_time = chrono::steady_clock::now();
+    
     while (true) {
         struct pcap_pkthdr* header;
         const u_char* reply;
@@ -86,7 +90,14 @@ string get_sender_mac(pcap_t* handle, const uint8_t* my_mac, const char* my_ip, 
 
             return string(arp_hdr->smac_);
         }
+
+        auto elapsed_time = chrono::steady_clock::now() - start_time;
+        if (chrono::duration_cast<chrono::seconds>(elapsed_time).count() > ARP_REPLY_TIMEOUT) {
+            cerr << "ARP reply timeout for IP: " << sender_ip << endl;
+            break;
+        }
     }
+    return "";
 }
 
 int main(int argc, char* argv[]) {
@@ -105,20 +116,16 @@ int main(int argc, char* argv[]) {
         cerr << "Failed to get MAC address for interface " << dev_str << endl;
         return -1;
     }
-   
-   
-    for (int i = 1; i < argc; i += 2) {
+
+    for (int i = 2; i < argc; i += 2) {
         EthArpPacket packet;
         const char* sender_ip = argv[i];
         const char* target_ip = argv[i + 1];
 
-	printf("sip : %s\n", sender_ip);
-	printf("tip : %s\n", target_ip);
-
         string sender_mac = get_sender_mac(handle, my_mac, argv[2], sender_ip);
 
         if (sender_mac.empty()) {
-            cerr << "Failed to get sender MAC address" << endl;
+            cerr << "Failed to get sender MAC address for IP: " << sender_ip << endl;
             continue;
         }
 
@@ -138,10 +145,13 @@ int main(int argc, char* argv[]) {
 
         int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
         if (res != 0) {
-            cerr << "Failed to send ARP reply: " << pcap_geterr(handle) << endl;
+            cerr << "Failed to send ARP reply to " << sender_ip << ": " << pcap_geterr(handle) << endl;
+        } else {
+            cout << "Sent ARP reply to " << sender_ip << " spoofing " << target_ip << endl;
         }
     }
 
     pcap_close(handle);
     return 0;
 }
+
