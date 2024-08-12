@@ -105,9 +105,9 @@ int main(int argc, char* argv[]) {
         cerr << "Failed to get MAC address for interface " << dev_str << endl;
         return -1;
     }
+    int n = argc;
 
-
-    for (int i = 1; i < argc; i += 2) {
+    for (int i = 1; i < n; i += 2) {
         EthArpPacket packet;
         const char* sender_ip = argv[i];
         const char* target_ip = argv[i + 1];
