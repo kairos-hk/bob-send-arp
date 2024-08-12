@@ -1,13 +1,17 @@
 #include <cstdio>
 #include <pcap.h>
-#include "ethhdr.h"
-#include "arphdr.h"
 #include <unistd.h>
 #include <array>
 #include <string>
 #include <fstream>
 #include <regex>
 #include <iostream>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <arpa/inet.h>
+
+#include "ethhdr.h"
+#include "arphdr.h"
 
 using namespace std;
 
@@ -26,20 +30,24 @@ void usage() {
 }
 
 bool get_mac_address(const string& if_name, uint8_t* mac_addr_buf) {
-    ifstream iface("/sys/class/net/" + if_name + "/address");
-    string str((istreambuf_iterator<char>(iface)), istreambuf_iterator<char>());
-    if (str.length() > 0) {
-        string hex = regex_replace(str, regex(":"), "");
-        uint64_t result = stoull(hex, 0, 16);
-        for (int i = 0; i < MAC_ADDR_LEN; i++) {
-            mac_addr_buf[i] = (uint8_t)((result & ((uint64_t)0xFF << (i * 8))) >> (i * 8));
-        }
-        return true;
+    struct ifreq ifr;
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock == -1) {
+        cerr << "Failed to create socket" << endl;
+        return false;
     }
-    return false;
+    strncpy(ifr.ifr_name, if_name.c_str(), IFNAMSIZ);
+    if (ioctl(sock, SIOCGIFHWADDR, &ifr) == -1) {
+        cerr << "Failed to get MAC address" << endl;
+        close(sock);
+        return false;
+    }
+    close(sock);
+    memcpy(mac_addr_buf, ifr.ifr_hwaddr.sa_data, MAC_ADDR_LEN);
+    return true;
 }
 
-string get_sender_mac(pcap_t* handle, const char* my_mac, const char* my_ip, const char* sender_ip) {
+string get_sender_mac(pcap_t* handle, const uint8_t* my_mac, const char* my_ip, const char* sender_ip) {
     EthArpPacket packet;
 
     packet.eth_.dmac_ = Mac("ff:ff:ff:ff:ff:ff");
@@ -57,21 +65,27 @@ string get_sender_mac(pcap_t* handle, const char* my_mac, const char* my_ip, con
     packet.arp_.tip_ = htonl(Ip(sender_ip));
 
     int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
+    if (res != 0) {
+        cerr << "Failed to send ARP request: " << pcap_geterr(handle) << endl;
+        return "";
+    }
 
     while (true) {
         struct pcap_pkthdr* header;
         const u_char* reply;
         int ret = pcap_next_ex(handle, &header, &reply);
 
-        auto* eth_hdr = (EthHdr*)reply;
-        if (ntohs(eth_hdr->type_) != EthHdr::Arp) continue;
+        if (ret == 1) {
+            auto* eth_hdr = (EthHdr*)reply;
+            if (ntohs(eth_hdr->type_) != EthHdr::Arp) continue;
 
-        auto* arp_hdr = (ArpHdr*)(reply + sizeof(EthHdr));
-        if (ntohs(arp_hdr->op_) != ArpHdr::Reply) continue;
-        if (arp_hdr->sip_ != htonl(Ip(sender_ip))) continue;
-        if (arp_hdr->tip_ != htonl(Ip(my_ip))) continue;
+            auto* arp_hdr = (ArpHdr*)(reply + sizeof(EthHdr));
+            if (ntohs(arp_hdr->op_) != ArpHdr::Reply) continue;
+            if (arp_hdr->sip_ != htonl(Ip(sender_ip))) continue;
+            if (arp_hdr->tip_ != htonl(Ip(my_ip))) continue;
 
-        return string(arp_hdr->smac_);
+            return string(arp_hdr->smac_);
+        }
     }
 }
 
@@ -99,7 +113,12 @@ int main(int argc, char* argv[]) {
         const char* sender_ip = argv[2 * i];
         const char* target_ip = argv[2 * i + 1];
 
-        string sender_mac = get_sender_mac(handle, reinterpret_cast<const char*>(my_mac), argv[2], sender_ip);
+        string sender_mac = get_sender_mac(handle, my_mac, argv[2], sender_ip);
+
+        if (sender_mac.empty()) {
+            cerr << "Failed to get sender MAC address" << endl;
+            continue;
+        }
 
         packet.eth_.dmac_ = Mac(sender_mac.c_str());
         packet.eth_.smac_ = Mac(my_mac);
@@ -116,6 +135,9 @@ int main(int argc, char* argv[]) {
         packet.arp_.tip_ = htonl(Ip(sender_ip));
 
         int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
+        if (res != 0) {
+            cerr << "Failed to send ARP reply: " << pcap_geterr(handle) << endl;
+        }
     }
 
     pcap_close(handle);
