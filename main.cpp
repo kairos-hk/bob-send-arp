@@ -115,7 +115,7 @@ int main(int argc, char* argv[]) {
 	printf("sip : %s\n", sender_ip);
 	printf("tip : %s\n", target_ip);
 
-        string sender_mac = get_sender_mac(handle, my_mac, argv[2], sender_ip);
+        string sender_mac = get_sender_mac(handle, my_mac, argv[i], sender_ip);
 
         if (sender_mac.empty()) {
             cerr << "Failed to get sender MAC address" << endl;
