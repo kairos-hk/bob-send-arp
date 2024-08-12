@@ -106,8 +106,8 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     int n = argc;
-
-    for (int i = 1; i < n; i += 2) {
+    printf("argc : %d\n", argc);
+    for (int i = 2; i < n; i += 2) {
         EthArpPacket packet;
         const char* sender_ip = argv[i];
         const char* target_ip = argv[i + 1];
