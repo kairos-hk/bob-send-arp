@@ -112,6 +112,9 @@ int main(int argc, char* argv[]) {
         const char* sender_ip = argv[i];
         const char* target_ip = argv[i + 1];
 
+	printf("sip : %s\n", sender_ip);
+	printf("tip : %s\n", target_ip);
+
         string sender_mac = get_sender_mac(handle, my_mac, argv[2], sender_ip);
 
         if (sender_mac.empty()) {
