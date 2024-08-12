@@ -106,12 +106,11 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    int n = (argc - 2) / 2;
 
-    for (int i = 1; i < n + 1; i++) {
+    for (int i = 1; i < argc; i += 2) {
         EthArpPacket packet;
-        const char* sender_ip = argv[2 * i];
-        const char* target_ip = argv[2 * i + 1];
+        const char* sender_ip = argv[i];
+        const char* target_ip = argv[i + 1];
 
         string sender_mac = get_sender_mac(handle, my_mac, argv[2], sender_ip);
 
