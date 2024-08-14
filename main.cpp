@@ -6,6 +6,7 @@
 #include <fstream>
 #include <regex>
 #include <iostream>
+#include <iomanip>
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <arpa/inet.h>
@@ -29,29 +30,27 @@ void usage() {
     printf("sample: send-arp wlan0 192.168.10.2 192.168.10.1\n");
 }
 
-bool get_mac_address(const string& if_name, uint8_t* mac_addr_buf) {
+bool get_mac_address(const string& if_name, Mac& mac_addr_buf) {
     struct ifreq ifr;
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock == -1) {
-        cerr << "Failed to create socket" << endl;
-        return false;
-    }
+
     strncpy(ifr.ifr_name, if_name.c_str(), IFNAMSIZ);
-    if (ioctl(sock, SIOCGIFHWADDR, &ifr) == -1) {
-        cerr << "Failed to get MAC address" << endl;
-        close(sock);
-        return false;
-    }
     close(sock);
-    memcpy(mac_addr_buf, ifr.ifr_hwaddr.sa_data, MAC_ADDR_LEN);
+
+    ostringstream oss;
+    for (int i = 0; i < MAC_ADDR_LEN; i++) {
+        oss << hex << setfill('0') << setw(2) << static_cast<int>(static_cast<uint8_t>(ifr.ifr_hwaddr.sa_data[i]));
+        if (i != MAC_ADDR_LEN - 1) oss << ":";
+    }
+    mac_addr_buf = Mac(oss.str());
     return true;
 }
 
-string get_sender_mac(pcap_t* handle, const uint8_t* my_mac, const char* my_ip, const char* sender_ip) {
+string get_sender_mac(pcap_t* handle, const Mac& my_mac, const char* my_ip, const char* sender_ip) {
     EthArpPacket packet;
 
     packet.eth_.dmac_ = Mac("ff:ff:ff:ff:ff:ff");
-    packet.eth_.smac_ = Mac(my_mac);
+    packet.eth_.smac_ = my_mac;
     packet.eth_.type_ = htons(EthHdr::Arp);
 
     packet.arp_.hrd_ = htons(ArpHdr::ETHER);
@@ -59,16 +58,12 @@ string get_sender_mac(pcap_t* handle, const uint8_t* my_mac, const char* my_ip, 
     packet.arp_.hln_ = Mac::SIZE;
     packet.arp_.pln_ = Ip::SIZE;
     packet.arp_.op_ = htons(ArpHdr::Request);
-    packet.arp_.smac_ = Mac(my_mac);
+    packet.arp_.smac_ = my_mac;
     packet.arp_.sip_ = htonl(Ip(my_ip));
     packet.arp_.tmac_ = Mac("00:00:00:00:00:00");
     packet.arp_.tip_ = htonl(Ip(sender_ip));
 
     int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
-    if (res != 0) {
-        cerr << "Failed to send ARP request: " << pcap_geterr(handle) << endl;
-        return "";
-    }
 
     while (true) {
         struct pcap_pkthdr* header;
@@ -99,31 +94,20 @@ int main(int argc, char* argv[]) {
     string dev_str = string(dev);
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
-    uint8_t my_mac[MAC_ADDR_LEN];
+    Mac my_mac;
 
-    if (!get_mac_address(dev_str, my_mac)) {
-        cerr << "Failed to get MAC address for interface " << dev_str << endl;
-        return -1;
-    }
-   
-   
-    for (int i = 1; i < argc; i += 2) {
+    for (int i = 2; i < argc; i += 2) {
         EthArpPacket packet;
         const char* sender_ip = argv[i];
         const char* target_ip = argv[i + 1];
 
-	printf("sip : %s\n", sender_ip);
-	printf("tip : %s\n", target_ip);
+        printf("sip : %s\n", sender_ip);
+        printf("tip : %s\n", target_ip);
 
         string sender_mac = get_sender_mac(handle, my_mac, argv[2], sender_ip);
 
-        if (sender_mac.empty()) {
-            cerr << "Failed to get sender MAC address" << endl;
-            continue;
-        }
-
         packet.eth_.dmac_ = Mac(sender_mac.c_str());
-        packet.eth_.smac_ = Mac(my_mac);
+        packet.eth_.smac_ = my_mac;
         packet.eth_.type_ = htons(EthHdr::Arp);
 
         packet.arp_.hrd_ = htons(ArpHdr::ETHER);
@@ -131,17 +115,13 @@ int main(int argc, char* argv[]) {
         packet.arp_.hln_ = Mac::SIZE;
         packet.arp_.pln_ = Ip::SIZE;
         packet.arp_.op_ = htons(ArpHdr::Reply);
-        packet.arp_.smac_ = Mac(my_mac);
+        packet.arp_.smac_ = my_mac;
         packet.arp_.sip_ = htonl(Ip(target_ip));
         packet.arp_.tmac_ = Mac(sender_mac.c_str());
         packet.arp_.tip_ = htonl(Ip(sender_ip));
 
         int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
-        if (res != 0) {
-            cerr << "Failed to send ARP reply: " << pcap_geterr(handle) << endl;
-        }
     }
 
     pcap_close(handle);
-    return 0;
 }
